@@ -185,6 +185,40 @@ def get_roles_by_team():
         return [dict(r) for r in c.fetchall()]
 
 
+def get_team_ranking_raw():
+    """팀 간 순위 전체 개별 응답 (응답자 정보 포함)"""
+    keys = [k for k, _ in TEAM_RANKING_QUESTIONS]
+    score_cols = ", ".join([f"tr.{k}" for k in keys])
+    total_expr = " + ".join([f"tr.{k}" for k in keys])
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute(f"""
+            SELECT s.respondent_team, s.respondent_name, tr.target_team,
+                   {score_cols}, ({total_expr}) as total, tr.question
+            FROM submissions s
+            JOIN team_ranking tr ON tr.submission_id = s.id
+            ORDER BY s.respondent_team, s.respondent_name, tr.target_team
+        """)
+        return [dict(r) for r in c.fetchall()]
+
+
+def get_contribution_raw():
+    """팀 내 기여도 전체 개별 응답 (응답자 정보 포함)"""
+    keys = [k for k, _ in CONTRIBUTION_QUESTIONS]
+    score_cols = ", ".join([f"c.{k}" for k in keys])
+    total_expr = " + ".join([f"c.{k}" for k in keys])
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute(f"""
+            SELECT s.respondent_team, s.respondent_name, c.target_team, c.target_name,
+                   {score_cols}, ({total_expr}) as total
+            FROM submissions s
+            JOIN contribution c ON c.submission_id = s.id
+            ORDER BY c.target_team, c.target_name, s.respondent_team, s.respondent_name
+        """)
+        return [dict(r) for r in c.fetchall()]
+
+
 def get_all_respondents():
     """제출한 모든 응답자 목록"""
     with get_conn() as conn:

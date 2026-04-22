@@ -11,6 +11,8 @@ from database import (
     get_all_respondents,
     get_individual_team_ranking,
     get_individual_contribution,
+    get_team_ranking_raw,
+    get_contribution_raw,
 )
 
 st.set_page_config(page_title="설문 결과 (관리자)", page_icon="🔐", layout="wide")
@@ -75,6 +77,27 @@ with tab1:
         csv = df.to_csv(index=False).encode("utf-8-sig")
         st.download_button("📥 CSV 다운로드", csv, "team_ranking_results.csv", "text/csv")
 
+    st.divider()
+    st.subheader("📋 개별 응답 원시 데이터")
+    raw = get_team_ranking_raw()
+    if not raw:
+        st.info("아직 응답이 없습니다.")
+    else:
+        raw_df = pd.DataFrame(raw)
+        col_rename = {
+            "respondent_team": "응답자 조",
+            "respondent_name": "응답자 이름",
+            "target_team": "평가 대상 조",
+            "total": "합계",
+            "question": "질문/코멘트",
+        }
+        for key, label in TEAM_RANKING_QUESTIONS:
+            col_rename[key] = label.split(" — ")[0]
+        raw_df = raw_df.rename(columns=col_rename)
+        st.dataframe(raw_df, use_container_width=True, hide_index=True)
+        csv_raw = raw_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("📥 개별 응답 CSV", csv_raw, "team_ranking_raw.csv", "text/csv")
+
 # ---------- 팀 내 기여도 ----------
 with tab2:
     st.subheader("팀 내 기여도 (조별)")
@@ -106,6 +129,32 @@ with tab2:
 
         csv = df.to_csv(index=False).encode("utf-8-sig")
         st.download_button("📥 CSV 다운로드", csv, "contribution_results.csv", "text/csv")
+
+    st.divider()
+    st.subheader("📋 개별 응답 원시 데이터")
+    raw_contrib = get_contribution_raw()
+    if not raw_contrib:
+        st.info("아직 응답이 없습니다.")
+    else:
+        raw_cdf = pd.DataFrame(raw_contrib)
+        col_rename = {
+            "respondent_team": "응답자 조",
+            "respondent_name": "응답자 이름",
+            "target_team": "평가 대상 조",
+            "target_name": "평가 대상 이름",
+            "total": "합계",
+        }
+        for key, label in CONTRIBUTION_QUESTIONS:
+            col_rename[key] = label.split(" — ")[0]
+        raw_cdf = raw_cdf.rename(columns=col_rename)
+
+        for team in sorted(raw_cdf["평가 대상 조"].unique()):
+            st.markdown(f"#### {team}")
+            sub = raw_cdf[raw_cdf["평가 대상 조"] == team].drop(columns=["평가 대상 조"]).sort_values(["평가 대상 이름", "응답자 조", "응답자 이름"]).reset_index(drop=True)
+            st.dataframe(sub, use_container_width=True, hide_index=True)
+
+        csv_raw = raw_cdf.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("📥 개별 응답 CSV", csv_raw, "contribution_raw.csv", "text/csv")
 
         st.divider()
         st.subheader("팀원별 맡은 역할")
