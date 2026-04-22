@@ -1,5 +1,6 @@
 import streamlit as st
 import sqlite3
+import pandas as pd
 from teams import (
     TEAMS,
     TEAM_RANKING_QUESTIONS,
@@ -12,12 +13,117 @@ from database import (
     create_submission,
     save_team_ranking,
     save_contribution,
+    get_team_ranking_results,
+    get_team_questions,
+    get_contribution_results,
+    get_submission_stats,
+    get_roles_by_team,
 )
 
 st.set_page_config(page_title="중간고사 발표 평가", page_icon="📝", layout="centered")
 
 init_db()
 
+ADMIN_PASSWORD = "admin1234"
+
+# ---------- 사이드바: 관리자 모드 ----------
+with st.sidebar:
+    st.caption("관리자")
+    if not st.session_state.get("auth"):
+        pw = st.text_input("관리자 비밀번호", type="password", key="pw_input")
+        if st.button("로그인"):
+            if pw == ADMIN_PASSWORD:
+                st.session_state["auth"] = True
+                st.rerun()
+            else:
+                st.error("비밀번호가 올바르지 않습니다.")
+    else:
+        st.success("관리자 모드")
+        if st.button("로그아웃"):
+            st.session_state["auth"] = False
+            st.rerun()
+
+# ========== 관리자 대시보드 ==========
+if st.session_state.get("auth"):
+    st.title("📈 설문 결과 대시보드")
+
+    stats = get_submission_stats()
+    c1, c2 = st.columns(2)
+    c1.metric("팀 간 순위 응답자 수", stats.get("team_ranking", 0))
+    c2.metric("기여도 평가 응답자 수", stats.get("contribution", 0))
+
+    tab1, tab2, tab3 = st.tabs(["📊 팀 간 순위", "👥 팀 내 기여도", "💬 질문사항"])
+
+    with tab1:
+        st.subheader("팀 간 순위 (총점 기준 내림차순)")
+        results = get_team_ranking_results()
+        if not results:
+            st.info("아직 응답이 없습니다.")
+        else:
+            df = pd.DataFrame(results)
+            rename_map = {"target_team": "조", "n_responses": "응답수", "total_avg": "총점(평균합)"}
+            for key, label in TEAM_RANKING_QUESTIONS:
+                rename_map[f"{key}_avg"] = label.split(" — ")[0]
+            df = df.rename(columns=rename_map)
+            df.insert(0, "순위", range(1, len(df) + 1))
+            num_cols = df.select_dtypes(include="number").columns.drop("순위").drop("응답수", errors="ignore")
+            df[num_cols] = df[num_cols].round(2)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            st.subheader("문항별 평균 (조별 비교)")
+            chart_cols = [label.split(" — ")[0] for _, label in TEAM_RANKING_QUESTIONS]
+            st.bar_chart(df.set_index("조")[chart_cols])
+
+            csv = df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("📥 CSV 다운로드", csv, "team_ranking_results.csv", "text/csv")
+
+    with tab2:
+        st.subheader("팀 내 기여도 (조별)")
+        results = get_contribution_results()
+        if not results:
+            st.info("아직 응답이 없습니다.")
+        else:
+            df = pd.DataFrame(results)
+            rename_map = {"target_team": "조", "target_name": "이름", "n_responses": "평가수", "total_avg": "총점(평균합)"}
+            for key, label in CONTRIBUTION_QUESTIONS:
+                rename_map[f"{key}_avg"] = label.split(" — ")[0]
+            df = df.rename(columns=rename_map)
+            num_cols = df.select_dtypes(include="number").columns.drop("평가수", errors="ignore")
+            df[num_cols] = df[num_cols].round(2)
+
+            for team in sorted(df["조"].unique()):
+                st.markdown(f"#### {team}")
+                sub = df[df["조"] == team].drop(columns=["조"]).sort_values("총점(평균합)", ascending=False).reset_index(drop=True)
+                sub.insert(0, "조내순위", range(1, len(sub) + 1))
+                st.dataframe(sub, use_container_width=True, hide_index=True)
+
+            csv = df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("📥 CSV 다운로드", csv, "contribution_results.csv", "text/csv")
+
+            st.divider()
+            st.subheader("팀원별 맡은 역할")
+            roles = get_roles_by_team()
+            if roles:
+                role_df = pd.DataFrame(roles).rename(
+                    columns={"respondent_team": "조", "respondent_name": "이름", "respondent_role": "역할"}
+                )
+                st.dataframe(role_df, use_container_width=True, hide_index=True)
+
+    with tab3:
+        st.subheader("💬 각 조에 대한 질문 (익명)")
+        questions = get_team_questions()
+        if not questions:
+            st.info("아직 작성된 질문이 없습니다.")
+        else:
+            q_df = pd.DataFrame(questions)
+            for team in sorted(q_df["target_team"].unique()):
+                st.markdown(f"#### {team}")
+                for i, q in enumerate(q_df[q_df["target_team"] == team]["question"].tolist(), 1):
+                    st.markdown(f"{i}. {q}")
+
+    st.stop()
+
+# ========== 응답자 설문 ==========
 st.title("📝 중간고사 발표 평가")
 st.caption("응답 내용은 익명으로 집계되며, 개별 응답자는 결과에 노출되지 않습니다.")
 
@@ -35,22 +141,17 @@ if not (my_team and my_name):
     st.info("먼저 본인의 조와 이름을 선택해 주세요.")
     st.stop()
 
-# ---------- 단계 결정: DB 제출 여부 기준 ----------
+# ---------- 단계 결정 ----------
 tr_done = has_submitted(my_team, my_name, "team_ranking")
 ct_done = has_submitted(my_team, my_name, "contribution")
 
-# session_state로 현재 단계 관리 (조/이름 바뀌면 리셋)
 identity_key = f"{my_team}__{my_name}"
 if st.session_state.get("identity_key") != identity_key:
     st.session_state["identity_key"] = identity_key
-    if tr_done:
-        st.session_state["step"] = "contribution"
-    else:
-        st.session_state["step"] = "team_ranking"
+    st.session_state["step"] = "contribution" if tr_done else "team_ranking"
 
 step = st.session_state.get("step", "team_ranking")
 
-# 진행 상태 표시
 st.divider()
 col_a, col_b = st.columns(2)
 with col_a:
@@ -68,7 +169,6 @@ with col_b:
 
 st.divider()
 
-# 모두 완료
 if tr_done and ct_done:
     st.success(f"🎉 {my_team} {my_name}님, 모든 설문에 응답하셨습니다. 감사합니다!")
     st.stop()
