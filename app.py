@@ -18,6 +18,7 @@ from database import (
     get_contribution_results,
     get_submission_stats,
     get_roles_by_team,
+    reset_db,
 )
 
 st.set_page_config(page_title="중간고사 발표 평가", page_icon="📝", layout="centered")
@@ -108,6 +109,16 @@ if st.session_state.get("auth"):
                     columns={"respondent_team": "조", "respondent_name": "이름", "respondent_role": "역할"}
                 )
                 st.dataframe(role_df, use_container_width=True, hide_index=True)
+
+    # ---------- 초기화 ----------
+    st.divider()
+    with st.expander("⚠️ 데이터 초기화 (위험)"):
+        st.warning("모든 응답 데이터가 삭제되며 복구할 수 없습니다.")
+        confirm = st.checkbox("초기화할 것을 확인합니다")
+        if st.button("전체 초기화", type="primary", disabled=not confirm):
+            reset_db()
+            st.success("초기화 완료! 모든 응답이 삭제되었습니다.")
+            st.rerun()
 
     with tab3:
         st.subheader("💬 각 조에 대한 질문 (익명)")

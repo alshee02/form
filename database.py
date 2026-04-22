@@ -183,3 +183,12 @@ def get_roles_by_team():
             ORDER BY s.respondent_team, s.respondent_name
         """)
         return [dict(r) for r in c.fetchall()]
+
+
+def reset_db():
+    """모든 응답 데이터 초기화"""
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM team_ranking")
+        c.execute("DELETE FROM contribution")
+        c.execute("DELETE FROM submissions")
