@@ -8,6 +8,9 @@ from database import (
     get_contribution_results,
     get_submission_stats,
     get_roles_by_team,
+    get_all_respondents,
+    get_individual_team_ranking,
+    get_individual_contribution,
 )
 
 st.set_page_config(page_title="설문 결과 (관리자)", page_icon="🔐", layout="wide")
@@ -37,7 +40,7 @@ c1, c2 = st.columns(2)
 c1.metric("팀 간 순위 응답자 수", stats.get("team_ranking", 0))
 c2.metric("기여도 평가 응답자 수", stats.get("contribution", 0))
 
-tab1, tab2, tab3 = st.tabs(["📊 팀 간 순위", "👥 팀 내 기여도", "💬 질문사항"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 팀 간 순위", "👥 팀 내 기여도", "💬 질문사항", "👤 개별 응답"])
 
 # ---------- 팀 간 순위 ----------
 with tab1:
@@ -112,6 +115,66 @@ with tab2:
                 columns={"respondent_team": "조", "respondent_name": "이름", "respondent_role": "역할"}
             )
             st.dataframe(role_df, use_container_width=True, hide_index=True)
+
+# ---------- 개별 응답 ----------
+with tab4:
+    st.subheader("👤 개별 응답 조회")
+    respondents = get_all_respondents()
+    if not respondents:
+        st.info("아직 제출된 응답이 없습니다.")
+    else:
+        # 제출자 목록 (중복 제거)
+        submitted_people = sorted(
+            {(r["respondent_team"], r["respondent_name"]) for r in respondents},
+            key=lambda x: (x[0], x[1]),
+        )
+        submitted_types = {
+            (r["respondent_team"], r["respondent_name"]): [] for r in respondents
+        }
+        for r in respondents:
+            submitted_types[(r["respondent_team"], r["respondent_name"])].append(r["survey_type"])
+
+        options = [f"{team} - {name}" for team, name in submitted_people]
+        selected = st.selectbox("응답자 선택", options)
+
+        if selected:
+            sel_team, sel_name = selected.split(" - ", 1)
+            done_types = submitted_types.get((sel_team, sel_name), [])
+
+            st.markdown(f"### {sel_team} · {sel_name}")
+            st.caption(f"제출한 설문: {', '.join(done_types)}")
+
+            # 팀 간 순위 응답
+            st.markdown("#### 📊 팀 간 순위 평가")
+            ranking_rows = get_individual_team_ranking(sel_team, sel_name)
+            if not ranking_rows:
+                st.info("팀 간 순위 응답 없음")
+            else:
+                ranking_df = pd.DataFrame(ranking_rows)
+                col_rename = {"target_team": "평가 대상 조", "question": "질문/코멘트"}
+                for key, label in TEAM_RANKING_QUESTIONS:
+                    col_rename[key] = label.split(" — ")[0]
+                ranking_df = ranking_df.rename(columns=col_rename)
+                st.dataframe(ranking_df, use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # 팀 내 기여도 응답
+            st.markdown("#### 👥 팀 내 기여도 평가")
+            contrib_rows = get_individual_contribution(sel_team, sel_name)
+            if not contrib_rows:
+                st.info("기여도 평가 응답 없음")
+            else:
+                contrib_df = pd.DataFrame(contrib_rows)
+                col_rename = {
+                    "target_team": "평가 대상 조",
+                    "target_name": "평가 대상 이름",
+                    "respondent_role": "본인 역할",
+                }
+                for key, label in CONTRIBUTION_QUESTIONS:
+                    col_rename[key] = label.split(" — ")[0]
+                contrib_df = contrib_df.rename(columns=col_rename)
+                st.dataframe(contrib_df, use_container_width=True, hide_index=True)
 
 # ---------- 질문사항 ----------
 with tab3:

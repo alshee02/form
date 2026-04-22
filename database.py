@@ -185,6 +185,48 @@ def get_roles_by_team():
         return [dict(r) for r in c.fetchall()]
 
 
+def get_all_respondents():
+    """제출한 모든 응답자 목록"""
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT respondent_team, respondent_name, survey_type, submitted_at
+            FROM submissions
+            ORDER BY respondent_team, respondent_name, survey_type
+        """)
+        return [dict(r) for r in c.fetchall()]
+
+
+def get_individual_team_ranking(respondent_team, respondent_name):
+    """특정 응답자의 팀 간 순위 응답 내역"""
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT tr.target_team, tr.question,
+                   """ + ", ".join([f"tr.{k}" for k, _ in TEAM_RANKING_QUESTIONS]) + """
+            FROM submissions s
+            JOIN team_ranking tr ON tr.submission_id = s.id
+            WHERE s.respondent_team = ? AND s.respondent_name = ?
+            ORDER BY tr.target_team
+        """, (respondent_team, respondent_name))
+        return [dict(r) for r in c.fetchall()]
+
+
+def get_individual_contribution(respondent_team, respondent_name):
+    """특정 응답자의 팀 내 기여도 응답 내역"""
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("""
+            SELECT c.target_team, c.target_name, c.respondent_role,
+                   """ + ", ".join([f"c.{k}" for k, _ in CONTRIBUTION_QUESTIONS]) + """
+            FROM submissions s
+            JOIN contribution c ON c.submission_id = s.id
+            WHERE s.respondent_team = ? AND s.respondent_name = ?
+            ORDER BY c.target_team, c.target_name
+        """, (respondent_team, respondent_name))
+        return [dict(r) for r in c.fetchall()]
+
+
 def reset_db():
     """모든 응답 데이터 초기화"""
     with get_conn() as conn:
